@@ -282,3 +282,79 @@ export function thumbForMeal(
   if (prefs.likedMealIds.includes(mealId)) return "up";
   return null;
 }
+
+/**
+ * User-specific meal-type suitability override.
+ * Does NOT change the global recipe classification — only this household's snapshot.
+ * Example: user likes BBQ ribs for breakfast → store breakfast: 0.9 for that mealId.
+ */
+export async function setMealOccasionOverride(input: {
+  mealId: string;
+  breakfast?: number | null;
+  lunch?: number | null;
+  dinner?: number | null;
+}) {
+  const mealId = input.mealId.trim();
+  if (!mealId) throw new Error("mealId is required");
+
+  const existing = await prisma.preference.findMany({
+    where: { type: PreferenceType.MEAL_OCCASION_OVERRIDE },
+  });
+  const match = existing.find((p) => {
+    try {
+      const parsed = JSON.parse(p.value) as { mealId?: string };
+      return parsed.mealId === mealId;
+    } catch {
+      return false;
+    }
+  });
+
+  const current = match
+    ? (JSON.parse(match.value) as {
+        mealId: string;
+        breakfast?: number;
+        lunch?: number;
+        dinner?: number;
+      })
+    : { mealId };
+
+  const next: {
+    mealId: string;
+    breakfast?: number;
+    lunch?: number;
+    dinner?: number;
+  } = { mealId };
+
+  const merge = (
+    key: "breakfast" | "lunch" | "dinner",
+    incoming: number | null | undefined,
+    prior?: number,
+  ) => {
+    if (incoming === null) return; // clear this key
+    if (incoming === undefined) {
+      if (prior != null) next[key] = prior;
+      return;
+    }
+    next[key] = Math.max(0, Math.min(1, incoming));
+  };
+
+  merge("breakfast", input.breakfast, current.breakfast);
+  merge("lunch", input.lunch, current.lunch);
+  merge("dinner", input.dinner, current.dinner);
+
+  const hasAny =
+    next.breakfast != null || next.lunch != null || next.dinner != null;
+
+  if (!hasAny) {
+    if (match) await prisma.preference.delete({ where: { id: match.id } });
+    return null;
+  }
+
+  const value = JSON.stringify(next);
+  if (match) {
+    return prisma.preference.update({ where: { id: match.id }, data: { value } });
+  }
+  return prisma.preference.create({
+    data: { type: PreferenceType.MEAL_OCCASION_OVERRIDE, value },
+  });
+}

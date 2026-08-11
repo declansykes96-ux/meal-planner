@@ -2,6 +2,8 @@ import type { MealType } from "@prisma/client";
 import type { MealRecord } from "@/lib/types/meal";
 import { listMeals } from "@/lib/services/meals";
 import { meetsMealTypeThreshold } from "@/lib/meal-occasion";
+import { isCatalogueEligible } from "@/lib/recipe-validation";
+import { normalizeName } from "@/lib/utils/dates";
 
 export type DiscoverMealsInput = {
   householdSize: number;
@@ -9,7 +11,11 @@ export type DiscoverMealsInput = {
   likedIngredients: string[];
   recentMealIds: string[];
   desiredCount: number;
-  /** Optional: bias discovery toward an occasion (still returns multi-occasion meals). */
+  /**
+   * When set, discovery HARD-filters to meals that meet the meal-type
+   * suitability threshold. Empty result means empty — never falls back to
+   * inappropriate occasions.
+   */
   mealType?: MealType;
 };
 
@@ -18,26 +24,53 @@ export type DiscoveredMeal = MealRecord & {
 };
 
 /**
- * Abstraction for bringing meal ideas into the planner.
- * Local catalogue now; external RecipeDiscoveryProvider implementations later
- * (see recipe-discovery.ts for normalization + classification).
+ * RecipeDiscoveryProvider (product name).
+ * External providers normalize → validate → classify → store; this interface
+ * only returns already-normalized MealRecords to the recommendation engine.
  */
 export interface MealDiscoveryProvider {
   discoverMeals(input: DiscoverMealsInput): Promise<DiscoveredMeal[]>;
 }
 
+function isEligibleMeal(meal: MealRecord): boolean {
+  return isCatalogueEligible({
+    name: meal.name,
+    description: meal.description,
+    ingredients: meal.ingredients,
+    instructions: meal.instructions,
+    servings: meal.servings,
+    imageUrl: meal.imageUrl,
+    imageSource: meal.imageSource,
+    sourceUrl: meal.sourceUrl,
+    sourceTitle: meal.sourceTitle,
+    source: meal.source,
+    breakfastSuitability: meal.breakfastSuitability,
+    lunchSuitability: meal.lunchSuitability,
+    dinnerSuitability: meal.dinnerSuitability,
+  });
+}
+
+function containsDisliked(meal: MealRecord, disliked: string[]): boolean {
+  if (!disliked.length) return false;
+  const names = meal.ingredients.map((i) => normalizeName(i.name));
+  return disliked.some((d) => names.includes(d) || names.some((n) => n.includes(d)));
+}
+
 /**
- * Local discovery backed by the Meal Library / seed catalogue.
- * Does not hard-filter to dinner-only — recommendation applies mealType gates.
+ * Local discovery backed by the validated Meal Library / seed catalogue.
  */
 export class LocalSeedMealDiscoveryProvider implements MealDiscoveryProvider {
   async discoverMeals(input: DiscoverMealsInput): Promise<DiscoveredMeal[]> {
-    const meals = await listMeals();
-    const pool = input.mealType
-      ? meals.filter((m) => meetsMealTypeThreshold(m, input.mealType!))
-      : meals;
+    const meals = (await listMeals()).filter(isEligibleMeal);
 
-    const scored = (pool.length ? pool : meals).map((meal) => {
+    let pool = meals.filter((m) => !containsDisliked(m, input.dislikedIngredients));
+
+    if (input.mealType) {
+      pool = pool.filter((m) => meetsMealTypeThreshold(m, input.mealType!));
+      // HARD filter: do not reopen the full catalogue if this occasion is thin.
+    }
+
+    const scored = pool.map((meal) => {
       let score = Math.random() * 3;
       if (meal.favourite) score += 2;
       if (
@@ -66,7 +99,7 @@ export function getMealDiscoveryProvider(): MealDiscoveryProvider {
   return provider;
 }
 
-/** For tests / future wiring of an external provider. */
+/** For tests / wiring an external RecipeDiscoveryProvider. */
 export function setMealDiscoveryProvider(next: MealDiscoveryProvider) {
   provider = next;
 }

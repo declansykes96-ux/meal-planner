@@ -18,6 +18,7 @@ import { Input, Label } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PlanningStyleControl } from "@/components/planner/PlanningStylePicker";
 import {
+  anotherMealAction,
   assignMealToSlotAction,
   removeMealSlotAction,
   restoreSlotMealAction,
@@ -134,10 +135,10 @@ type WheelFaceStyle = {
 };
 
 /**
- * Face slots at rest: -1 = next (left), 0 = current, +1 = previous (right).
+ * Face slots at rest: -1 = previous (left), 0 = current, +1 = next (right).
  * Finger-following carousel (progress = dx / range):
- *   swipe left  (progress → -1) → previous (right face) comes to center
- *   swipe right (progress → +1) → next (left face) comes to center
+ *   swipe left  (progress → -1) → next (right face) comes to center
+ *   swipe right (progress → +1) → previous (left face) comes to center
  */
 function wheelFaceStyle(slot: -1 | 0 | 1, progress: number): WheelFaceStyle {
   const t = slot + progress;
@@ -518,15 +519,28 @@ export function SlotSwipeCard({
 
   function goPrev() {
     if (slot.locked || browseLock.current || !canGoPrev) return;
-    animateProgressTo(-1, () => {
+    // Swipe right / left arrow: previous arrives from the left
+    animateProgressTo(1, () => {
       commitStep("prev");
     });
   }
 
   function goNext() {
     if (slot.locked || browseLock.current || !canGoNext) return;
-    animateProgressTo(1, () => {
+    // Swipe left / right arrow: next arrives from the right
+    animateProgressTo(-1, () => {
       commitStep("next");
+    });
+  }
+
+  function randomiseSlot() {
+    if (slot.locked || pending) return;
+    clearSlotMealWheel(slot.id);
+    persistWheel({ items: [], index: 0 });
+    setOptimistic(null);
+    setThumbOverride(null);
+    run(async () => {
+      await anotherMealAction(slot.id);
     });
   }
 
@@ -603,13 +617,13 @@ export function SlotSwipeCard({
 
     if (axis === "x") {
       const p = progressRef.current;
-      // progress = dx / range: negative = swipe left (prev), positive = swipe right (next)
-      if (p <= -WHEEL_COMMIT_PROGRESS && canGoPrev) {
-        animateProgressTo(-1, () => commitStep("prev"));
+      // progress = dx / range: negative = swipe left (next), positive = swipe right (prev)
+      if (p <= -WHEEL_COMMIT_PROGRESS && canGoNext) {
+        animateProgressTo(-1, () => commitStep("next"));
         return;
       }
-      if (p >= WHEEL_COMMIT_PROGRESS && canGoNext) {
-        animateProgressTo(1, () => commitStep("next"));
+      if (p >= WHEEL_COMMIT_PROGRESS && canGoPrev) {
+        animateProgressTo(1, () => commitStep("prev"));
         return;
       }
       animateProgressTo(0);
@@ -646,13 +660,14 @@ export function SlotSwipeCard({
 
   const clampedProgress = (() => {
     let p = progress;
-    if (!canGoPrev && p < 0) p = Math.max(p, -0.15);
-    if (!canGoNext && p > 0) p = Math.min(p, 0.15);
+    // Negative progress pulls next from the right; positive pulls prev from the left
+    if (!canGoNext && p < 0) p = Math.max(p, -0.15);
+    if (!canGoPrev && p > 0) p = Math.min(p, 0.15);
     return p;
   })();
 
-  const nextStyle = wheelFaceStyle(-1, clampedProgress);
-  const prevStyle = wheelFaceStyle(1, clampedProgress);
+  const prevStyle = wheelFaceStyle(-1, clampedProgress);
+  const nextStyle = wheelFaceStyle(1, clampedProgress);
   const currentStyle = (() => {
     const base = wheelFaceStyle(0, clampedProgress);
     const y = vertProgress * 42;
@@ -686,15 +701,23 @@ export function SlotSwipeCard({
       {!meal ? (
         <div className="rounded-2xl border border-dashed border-border bg-surface/70 p-6 text-center">
           <p className="text-sm text-muted">Empty slot</p>
-          <Button
-            type="button"
-            className="mt-3"
-            variant="primary"
-            disabled={pending || slot.locked}
-            onClick={() => setPickOpen(true)}
-          >
-            Add meal
-          </Button>
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+            <Button
+              type="button"
+              variant="primary"
+              disabled={pending || slot.locked}
+              onClick={randomiseSlot}
+            >
+              {pending ? "Randomising…" : "Randomise"}
+            </Button>
+            <Button
+              type="button"
+              disabled={pending || slot.locked}
+              onClick={() => setPickOpen(true)}
+            >
+              Pick from library
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="flex items-stretch gap-2">
@@ -719,11 +742,11 @@ export function SlotSwipeCard({
               className={`relative overflow-visible outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${slot.locked ? "rounded-2xl ring-2 ring-danger/50" : ""} ${cardBusy ? "pointer-events-none" : ""}`}
               style={{ height: "13.5rem" }}
             >
-              {showPeeks && peekNext ? (
-                <WheelFace meal={peekNext} label="Also try" style={nextStyle} />
-              ) : null}
               {showPeeks && peekPrev ? (
                 <WheelFace meal={peekPrev} label="Also try" style={prevStyle} />
+              ) : null}
+              {showPeeks && peekNext ? (
+                <WheelFace meal={peekNext} label="Also try" style={nextStyle} />
               ) : null}
               <WheelFace
                 meal={{ name: meal.name, imageUrl: meal.imageUrl }}
@@ -765,8 +788,8 @@ export function SlotSwipeCard({
 
                   if (dragAxis.current === "x") {
                     let next = dx / WHEEL_DRAG_RANGE;
-                    if (!canGoPrev && next < 0) next = Math.max(next, -0.12);
-                    if (!canGoNext && next > 0) next = Math.min(next, 0.12);
+                    if (!canGoNext && next < 0) next = Math.max(next, -0.12);
+                    if (!canGoPrev && next > 0) next = Math.min(next, 0.12);
                     next = Math.max(-1.15, Math.min(1.15, next));
                     vertRef.current = 0;
                     setProgressOnDrag(next);
@@ -917,8 +940,15 @@ export function SlotSwipeCard({
                     })
                   }
                 />
+                <Button
+                  type="button"
+                  disabled={pending || slot.locked || gestureBusy}
+                  onClick={randomiseSlot}
+                >
+                  {pending ? "Randomising…" : "Randomise"}
+                </Button>
                 <Button type="button" disabled={pending || slot.locked} onClick={() => setPickOpen(true)}>
-                  Add meal
+                  Pick meal
                 </Button>
                 <Button
                   type="button"
@@ -940,7 +970,7 @@ export function SlotSwipeCard({
                   className="ml-auto"
                   onClick={removeSlot}
                 >
-                  Clear slot
+                  Clear meal
                 </Button>
               </div>
             </div>

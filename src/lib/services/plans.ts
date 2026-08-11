@@ -212,6 +212,7 @@ export async function generateMealPlan(
     likedIngredients: prefs.liked,
     recentMealIds: [...prefs.recentlyRejectedMealIds, ...lockedMealIds],
     desiredCount: Math.max(unlockedNeeded * 3, 80),
+    // No mealType: need a mixed pool; hard occasion filter runs in suggestReplacementMeal
   });
 
   // Score unlocked slots with their effective style (week + preserved day/slot overrides)
@@ -353,6 +354,7 @@ export async function replaceOccasionMeal(slotId: string, extraExcludeIds: strin
     likedIngredients: prefs.liked,
     recentMealIds: prefs.recentlyRejectedMealIds,
     desiredCount: 12,
+    mealType: slot.mealType,
   });
 
   const excludeIds = [
@@ -448,13 +450,21 @@ export async function peekNextMealsForPlan(
   const prefs = await getPreferenceSnapshot();
   const householdSize = plan.householdSize;
   const dayStyles = parseDayPlanningStyles(plan.dayPlanningStyles);
-  const pool = await getMealDiscoveryProvider().discoverMeals({
-    householdSize,
-    dislikedIngredients: prefs.disliked,
-    likedIngredients: prefs.liked,
-    recentMealIds: prefs.recentlyRejectedMealIds,
-    desiredCount: 36,
-  });
+
+  const pools = await Promise.all(
+    (["BREAKFAST", "LUNCH", "DINNER"] as const).map(async (mealType) => {
+      const pool = await getMealDiscoveryProvider().discoverMeals({
+        householdSize,
+        dislikedIngredients: prefs.disliked,
+        likedIngredients: prefs.liked,
+        recentMealIds: prefs.recentlyRejectedMealIds,
+        desiredCount: 36,
+        mealType,
+      });
+      return [mealType, pool] as const;
+    }),
+  );
+  const poolByType: Partial<Record<MealType, (typeof pools)[number][1]>> = Object.fromEntries(pools);
 
   const plannedIds = plan.plannedMeals
     .filter((s) => s.enabled && s.mealId)
@@ -472,6 +482,7 @@ export async function peekNextMealsForPlan(
       dayStyle: dayStyles[dateKey] ?? null,
       slotStyle: slot.planningStyle,
     });
+    const pool = poolByType[slot.mealType] ?? [];
     const excludeIds = [...plannedIds, slot.mealId];
     const nextMeal = suggestReplacementMeal(
       pool,

@@ -171,6 +171,18 @@ export async function updatePreferredPlanningStyleAction(planningStyle: Planning
   refresh();
 }
 
+/** User-specific B/L/D suitability override — does not change global recipe scores. */
+export async function setMealOccasionOverrideAction(input: {
+  mealId: string;
+  breakfast?: number | null;
+  lunch?: number | null;
+  dinner?: number | null;
+}) {
+  const { setMealOccasionOverride } = await import("@/lib/services/preferences");
+  await setMealOccasionOverride(input);
+  refresh();
+}
+
 /** @deprecated use anotherMealAction */
 export async function swipeReplaceAction(slotId: string) {
   return anotherMealAction(slotId);

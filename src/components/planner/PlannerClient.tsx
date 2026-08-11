@@ -17,10 +17,12 @@ import {
 } from "@/components/planner/SlotSwipeCard";
 import {
   generatePlanAction,
+  setDayPlanningStyleAction,
   setWeekPlanningStyleAction,
   swapDaysAction,
   toggleDayEnabledAction,
 } from "@/lib/actions/plans";
+import { PlanningStyleControl } from "@/components/planner/PlanningStylePicker";
 import { PLANNING_STYLE_META } from "@/lib/planning-style";
 import { formatDayLabel } from "@/lib/utils/dates";
 
@@ -240,6 +242,8 @@ export function PlannerClient({
       ) : openDay ? (
         <DayFocusView
           day={openDay}
+          planId={planId}
+          weekPlanningStyle={weekPlanningStyle}
           libraryMeals={libraryMeals}
           onBack={goBackFromDay}
           onOpenMeal={setOpenMeal}
@@ -350,15 +354,21 @@ export function PlannerClient({
 
 function DayFocusView({
   day,
+  planId,
+  weekPlanningStyle,
   libraryMeals,
   onBack,
   onOpenMeal,
 }: {
   day: DayCardData;
+  planId: string | null;
+  weekPlanningStyle: PlanningStyle;
   libraryMeals: LibraryOption[];
   onBack: () => void;
   onOpenMeal: (meal: SlotMeal) => void;
 }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
   const label = formatDayLabel(new Date(day.dateIso));
 
   return (
@@ -369,11 +379,34 @@ function DayFocusView({
         </Button>
       </div>
 
-      <div>
-        <h2 className="text-3xl">{label}</h2>
-        <p className="mt-2 text-sm text-muted">
-          Tap for the recipe · swipe either way through meal options · desktop arrows work the same
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-3xl">{label}</h2>
+          <p className="mt-2 text-sm text-muted">
+            Tap for the recipe · swipe either way through meal options · desktop arrows work the same
+          </p>
+        </div>
+        {planId ? (
+          <div className="flex flex-col items-stretch gap-1.5 sm:items-end">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
+              Day planning style
+            </p>
+            <PlanningStyleControl
+              effectiveStyle={day.effectivePlanningStyle}
+              override={day.dayPlanningStyle}
+              inheritLabel={`Use weekly setting — ${PLANNING_STYLE_META[weekPlanningStyle].short}`}
+              appearance="button"
+              align="right"
+              disabled={pending}
+              onChange={(next) => {
+                startTransition(async () => {
+                  await setDayPlanningStyleAction(planId, day.dateKey, next);
+                  router.refresh();
+                });
+              }}
+            />
+          </div>
+        ) : null}
       </div>
 
       <div className="mx-auto grid max-w-xl gap-6">
