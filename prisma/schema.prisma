@@ -1,0 +1,212 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACK
+}
+
+enum MealSource {
+  SEED
+  MANUAL
+  AI
+  IMPORTED
+  WEB
+}
+
+enum PreferenceType {
+  LIKED_INGREDIENT
+  DISLIKED_INGREDIENT
+  DIETARY_RESTRICTION
+  PREFERENCE_NOTE
+  /// Explicit thumbs-up — value is mealId
+  LIKED_MEAL
+  /// Explicit thumbs-down / "Don't suggest" — value is mealId
+  DISLIKED_MEAL
+  /// User-specific B/L/D suitability override — value is JSON
+  /// { "mealId": "...", "breakfast"?: 0-1, "lunch"?: 0-1, "dinner"?: 0-1 }
+  MEAL_OCCASION_OVERRIDE
+}
+
+enum PreferenceEventType {
+  MEAL_ACCEPTED
+  MEAL_REJECTED
+  /// Swipe-right history for variety only — not a food dislike
+  MEAL_REPLACED
+  /// No preference signal: empty slot / scheduling only
+  MEAL_SLOT_CLEARED
+  MEAL_LOCKED
+  MEAL_UNLOCKED
+  MEAL_FAVOURITED
+  /// Explicit thumbs-down / don't suggest
+  MEAL_BLOCKED
+  INGREDIENT_REMOVED
+  INGREDIENT_SUBSTITUTED
+  MEAL_COOKED_REPEATED
+  SUGGESTION_DISMISSED
+}
+
+enum OccasionKind {
+  COOK
+  LEFTOVER
+}
+
+/// How strongly the planner prioritises yield / leftovers for recommendations.
+enum PlanningStyle {
+  FRESH
+  BALANCED
+  STRETCH
+}
+
+/// Singleton-style household settings (one row for this personal MVP).
+model HouseholdSettings {
+  id                        String         @id @default(cuid())
+  /// Number of people planned for (1, 2, … extensible).
+  householdSize             Int            @default(2)
+  rememberHouseholdSize     Boolean        @default(false)
+  /// When true (or remember is set), skip the first-use prompt.
+  householdPromptCompleted  Boolean        @default(false)
+  /// Saved default when "Remember this" is checked on the planning-style prompt.
+  preferredPlanningStyle    PlanningStyle?
+  rememberPlanningStyle     Boolean        @default(false)
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
+}
+
+model Meal {
+  id                   String             @id @default(cuid())
+  name                 String
+  description          String             @default("")
+  /// JSON: Array<{ name: string; quantity?: number | null; unit?: string | null }>
+  ingredients          String             @default("[]")
+  instructions         String             @default("")
+  prepTimeMinutes      Int?
+  cookTimeMinutes      Int?
+  /// Adult portions the full recipe produces.
+  servings             Int                @default(4)
+  /// JSON: string[]
+  tags                 String             @default("[]")
+  favourite            Boolean            @default(false)
+  timesUsed            Int                @default(0)
+  lastUsedAt           DateTime?
+  source               MealSource         @default(MANUAL)
+  imageUrl             String?
+  /// Where the image came from (e.g. unsplash, local, placeholder).
+  imageSource          String?
+  /// Optional credit / attribution string for the image.
+  imageAttribution     String?
+  goodForLeftovers     Boolean            @default(false)
+  leftoverStorageDays  Int?
+  reheatsWell          Boolean            @default(false)
+  batchFriendly        Boolean            @default(false)
+  /// Optional total ingredient cost in AUD — for future cost-per-serving Stretch scoring.
+  estimatedIngredientCost Float?
+  /// 0–1 Australian-baseline suitability for breakfast (user overrides can raise this).
+  breakfastSuitability Float              @default(0)
+  /// 0–1 suitability for lunch.
+  lunchSuitability     Float              @default(0.5)
+  /// 0–1 suitability for dinner.
+  dinnerSuitability    Float              @default(0.5)
+  /// Derived convenience flags (suitability >= 0.45). Kept for older call sites.
+  suitableForLunch     Boolean            @default(true)
+  suitableForDinner    Boolean            @default(true)
+  suitableForBreakfast Boolean            @default(false)
+  sourceTitle          String?
+  sourceUrl            String?
+  discoveredAt         DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  plannedMeals         PlannedMeal[]
+  cookedBatches        CookedMealBatch[]
+  events               PreferenceEvent[]
+}
+
+model MealPlan {
+  id            String            @id @default(cuid())
+  startDate     DateTime
+  durationDays  Int
+  householdSize Int               @default(2)
+  /// Week-default Planning Style for this plan.
+  planningStyle PlanningStyle     @default(BALANCED)
+  isActive      Boolean           @default(true)
+  /// JSON: Record<dateKey, mealId> — stable hero photo per day for the week carousel
+  dayHeroes     String            @default("{}")
+  /// JSON: Record<dateKey, PlanningStyle> — day-level overrides
+  dayPlanningStyles String        @default("{}")
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  plannedMeals  PlannedMeal[]
+  cookedBatches CookedMealBatch[]
+}
+
+/// A physical cook / batch of food that can cover multiple meal occasions.
+model CookedMealBatch {
+  id                 String        @id @default(cuid())
+  mealPlanId         String
+  mealId             String
+  recipeServings     Int
+  servingsConsumed   Int           @default(0)
+  servingsRemaining  Int
+  cookedOn           DateTime?
+  createdAt          DateTime      @default(now())
+  mealPlan           MealPlan      @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
+  meal               Meal          @relation(fields: [mealId], references: [id], onDelete: Cascade)
+  occasions          PlannedMeal[]
+
+  @@index([mealPlanId])
+}
+
+/// A meal occasion for a specific day + meal type (Breakfast / Lunch / Dinner).
+/// mealId null = empty slot. enabled false = day/slot disabled without deleting the plan.
+model PlannedMeal {
+  id                String         @id @default(cuid())
+  mealPlanId        String
+  mealId            String?
+  date              DateTime
+  mealType          MealType       @default(DINNER)
+  kind              OccasionKind   @default(COOK)
+  locked            Boolean        @default(false)
+  enabled           Boolean        @default(true)
+  /// Slot override; null inherits from day → week.
+  planningStyle     PlanningStyle?
+  cookedMealBatchId String?
+  mealPlan          MealPlan       @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
+  meal              Meal?          @relation(fields: [mealId], references: [id], onDelete: SetNull)
+  cookedMealBatch   CookedMealBatch? @relation(fields: [cookedMealBatchId], references: [id], onDelete: SetNull)
+
+  @@unique([mealPlanId, date, mealType])
+  @@index([mealPlanId])
+}
+
+model Preference {
+  id        String         @id @default(cuid())
+  type      PreferenceType
+  value     String
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([type])
+}
+
+model PreferenceEvent {
+  id                    String              @id @default(cuid())
+  type                  PreferenceEventType
+  mealId                String?
+  ingredient            String?
+  replacementIngredient String?
+  metadata              String?
+  createdAt             DateTime            @default(now())
+  meal                  Meal?               @relation(fields: [mealId], references: [id], onDelete: SetNull)
+
+  @@index([type])
+  @@index([ingredient])
+  @@index([createdAt])
+}

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600" fill="none">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="800" y2="600" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6b7280"/>
+      <stop offset="1" stop-color="#374151"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="600" fill="url(#g)"/>
+  <rect x="220" y="200" width="360" height="220" rx="24" fill="#4b5563" stroke="#9ca3af" stroke-width="3" stroke-dasharray="12 10"/>
+  <text x="400" y="320" text-anchor="middle" fill="#d1d5db" font-family="Georgia, serif" font-size="28">No meals planned</text>
+</svg>

@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f4f6f5;
+  --foreground: #1c2421;
+  --surface: #ffffff;
+  --surface-muted: #e9eeea;
+  --border: #cfd8d2;
+  --accent: #2f6b4f;
+  --accent-hover: #24553e;
+  --accent-soft: #dceae2;
+  --danger: #9b3b32;
+  --muted: #5c6b63;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-muted: var(--muted);
+  --font-sans: var(--font-source-sans);
+  --font-display: var(--font-fraunces);
+}
+
+body {
+  background:
+    radial-gradient(ellipse 70% 45% at 0% 0%, #dceae2 0%, transparent 55%),
+    var(--background);
+  color: var(--foreground);
+  font-family: var(--font-source-sans), system-ui, sans-serif;
+  min-height: 100vh;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-fraunces), Georgia, serif;
+  letter-spacing: -0.02em;
+}
+
+@keyframes settle {
+  0% {
+    transform: scale(0.98);
+  }
+  60% {
+    transform: scale(1.015);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes plately-wheel {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes plately-wheel {
+    from {
+      transform: none;
+    }
+    to {
+      transform: none;
+    }
+  }
+}
